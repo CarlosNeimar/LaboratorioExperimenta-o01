@@ -137,56 +137,137 @@ def verificar_rate_limit():
 
 def buscar_detalhes_repositorio(owner, repo_name):
     """
-    Busca detalhes específicos de um repositório.
+    Busca detalhes específicos de um repositório, incluindo PRs, releases e issues.
     """
     url = f"{REPO_BASE_URL}/{owner}/{repo_name}"
     
-    # Informações básicas do repositório
-    repo_data = fazer_requisicao_com_retry(url)
-    if not repo_data:
-        return None
+    print(f"    Buscando detalhes adicionais...")
     
-    # Pausa pequena entre requisições
-    time.sleep(0.1)
-    
-    # Busca pulls mergeados
-    pulls_url = f"{url}/pulls"
-    pulls_params = {'state': 'closed', 'per_page': 1, 'page': 1}
-    pulls_response = fazer_requisicao_com_retry(pulls_url, pulls_params)
-    
-    # Extrai o número total de pulls do header Link (se disponível)
+    # Busca Pull Requests mergeados
     merged_pulls_count = 0
-    if pulls_response is not None:
-        # Como é difícil contar pulls mergeados via API REST, usamos uma estimativa
-        # baseada no número total de pulls fechados
-        merged_pulls_count = repo_data.get('open_issues_count', 0) // 2  # Estimativa aproximada
+    try:
+        # Busca PRs com estado 'closed' e merged = true
+        pulls_url = f"{url}/pulls"
+        pulls_params = {'state': 'closed', 'per_page': 100, 'page': 1}
+        
+        pulls_response = fazer_requisicao_com_retry(pulls_url, pulls_params)
+        if pulls_response:
+            # Conta apenas os PRs que foram realmente mergeados
+            merged_pulls_count = sum(1 for pr in pulls_response if pr.get('merged_at') is not None)
+            
+            # Se tem 100 resultados, pode ter mais páginas - faz uma estimativa
+            if len(pulls_response) == 100:
+                print(f"      PR: Mais de 100 PRs encontrados, contando páginas adicionais...")
+                page = 2
+                while page <= 3:  # Limita a 3 páginas para não exceder rate limit
+                    pulls_params['page'] = page
+                    more_pulls = fazer_requisicao_com_retry(pulls_url, pulls_params)
+                    if more_pulls and len(more_pulls) > 0:
+                        merged_pulls_count += sum(1 for pr in more_pulls if pr.get('merged_at') is not None)
+                        if len(more_pulls) < 100:
+                            break
+                        page += 1
+                        time.sleep(0.5)
+                    else:
+                        break
+        
+        time.sleep(0.3)
+    except Exception as e:
+        print(f"      Erro ao buscar PRs: {e}")
+        merged_pulls_count = 0
     
-    time.sleep(0.1)
+    # Busca Releases
+    releases_count = 0
+    try:
+        releases_url = f"{url}/releases"
+        releases_params = {'per_page': 100}
+        releases_response = fazer_requisicao_com_retry(releases_url, releases_params)
+        if releases_response:
+            releases_count = len(releases_response)
+            
+            # Se tem 100 releases, pode ter mais
+            if len(releases_response) == 100:
+                print(f"      Releases: Mais de 100 releases, fazendo contagem adicional...")
+                page = 2
+                while page <= 2:  # Limita a 2 páginas
+                    releases_params['page'] = page
+                    more_releases = fazer_requisicao_com_retry(releases_url, releases_params)
+                    if more_releases and len(more_releases) > 0:
+                        releases_count += len(more_releases)
+                        if len(more_releases) < 100:
+                            break
+                        page += 1
+                        time.sleep(0.5)
+                    else:
+                        break
+        
+        time.sleep(0.3)
+    except Exception as e:
+        print(f"      Erro ao buscar releases: {e}")
+        releases_count = 0
     
-    # Busca releases
-    releases_url = f"{url}/releases"
-    releases_params = {'per_page': 100}  # GitHub limita a 100 por página
-    releases_response = fazer_requisicao_com_retry(releases_url, releases_params)
-    releases_count = len(releases_response) if releases_response else 0
+    # Busca Issues fechadas e abertas para calcular a razão
+    issues_abertas = 0
+    issues_fechadas = 0
+    razao_issues = 'N/A'
     
-    time.sleep(0.1)
+    try:
+        issues_url = f"{url}/issues"
+        
+        # Issues abertas
+        issues_abertas_params = {'state': 'open', 'per_page': 100}
+        issues_abertas_response = fazer_requisicao_com_retry(issues_url, issues_abertas_params)
+        if issues_abertas_response:
+            issues_abertas = len(issues_abertas_response)
+        
+        time.sleep(0.3)
+        
+        # Issues fechadas
+        issues_fechadas_params = {'state': 'closed', 'per_page': 100}
+        issues_fechadas_response = fazer_requisicao_com_retry(issues_url, issues_fechadas_params)
+        if issues_fechadas_response:
+            issues_fechadas = len(issues_fechadas_response)
+            
+            # Se tem 100 issues fechadas, provavelmente tem mais
+            if len(issues_fechadas_response) == 100:
+                print(f"      Issues: Mais de 100 issues fechadas, fazendo estimativa...")
+                # Faz uma estimativa baseada em múltiplas páginas
+                page = 2
+                while page <= 3:  # Limita a 3 páginas
+                    issues_fechadas_params['page'] = page
+                    more_issues = fazer_requisicao_com_retry(issues_url, issues_fechadas_params)
+                    if more_issues and len(more_issues) > 0:
+                        issues_fechadas += len(more_issues)
+                        if len(more_issues) < 100:
+                            break
+                        page += 1
+                        time.sleep(0.5)
+                    else:
+                        break
+        
+        # Calcula a razão
+        total_issues = issues_abertas + issues_fechadas
+        if total_issues > 0:
+            razao_issues = round(issues_fechadas / total_issues, 3)
+        
+        time.sleep(0.3)
+        
+    except Exception as e:
+        print(f"      Erro ao buscar issues: {e}")
     
-    # Busca issues fechadas (aproximação)
-    issues_url = f"{url}/issues"
-    closed_issues_params = {'state': 'closed', 'per_page': 1}
-    closed_issues_response = fazer_requisicao_com_retry(issues_url, closed_issues_params)
+    print(f"      PRs mergeados: {merged_pulls_count}, Releases: {releases_count}, Razão issues fechadas: {razao_issues}")
     
     return {
-        'repo_data': repo_data,
         'merged_pulls_count': merged_pulls_count,
         'releases_count': releases_count,
-        'closed_issues_available': closed_issues_response is not None
+        'issues_abertas': issues_abertas,
+        'razao_issues_fechadas': razao_issues
     }
 
 def main():
     """Função principal para buscar e processar os dados dos repositórios via API REST."""
     if not GITHUB_TOKEN or GITHUB_TOKEN == 'SEU_TOKEN_AQUI':
-        print("ERRO: com token do GitHub no arquivo .env.")
+        print("ERRO: Token do GitHub não configurado no arquivo .env.")
         return
 
     # Verifica o rate limit inicial
@@ -201,7 +282,7 @@ def main():
     
     all_repos = []
     repos_por_pagina = 30  # GitHub permite até 100, mas 30 é mais seguro
-    total_repos_desejados = 100
+    total_repos_desejados = 50  # Reduzido para 50 devido às requisições adicionais
     total_de_paginas = (total_repos_desejados + repos_por_pagina - 1) // repos_por_pagina
     
     print(f"\nBuscando os {total_repos_desejados} repositórios com mais estrelas...")
@@ -238,7 +319,7 @@ def main():
 
         # Pausa entre páginas para evitar rate limiting
         if page_num < total_de_paginas:
-            delay = random.uniform(2, 4)  # Pausa mais longa para API REST
+            delay = random.uniform(2, 4)
             print(f"  Aguardando {delay:.1f} segundos...")
             time.sleep(delay)
         
@@ -254,6 +335,7 @@ def main():
     # Processa os dados coletados
     repo_data_list = []
     print(f"\n--- Processando {len(all_repos)} repositórios ---")
+    print("⚠️  Este processo pode demorar devido às requisições adicionais para obter dados completos.")
 
     for i, repo in enumerate(all_repos):
         if not repo: 
@@ -261,6 +343,7 @@ def main():
 
         try:
             repo_name = repo['full_name']
+            owner, name = repo_name.split('/')
             print(f"({i+1:3d}/{len(all_repos)}) {repo_name}")
 
             # Calcula dias desde última atualização
@@ -271,34 +354,32 @@ def main():
             else:
                 time_since_update_days = -1
 
-            # Para simplificar e evitar muitas requisições adicionais,
-            # usamos os dados básicos disponíveis na busca
-            open_issues_count = repo.get('open_issues_count', 0)
+            # Busca detalhes adicionais do repositório
+            detalhes = buscar_detalhes_repositorio(owner, name)
             
-            # Dados básicos do repositório
+            # Dados completos do repositório
             repo_data = {
                 'Repositorio': repo_name,
                 'Estrelas': repo.get('stargazers_count', 0),
                 'Linguagem_Primaria': repo.get('language', 'N/A') or 'N/A',
                 'Data_de_Criacao': repo.get('created_at', '').split('T')[0] if repo.get('created_at') else 'N/A',
                 'Dias_desde_Ultima_Atualizacao': time_since_update_days,
-                'Pull_Requests_Aceitas': 'N/A',  # Requer requisições adicionais
-                'Total_de_Releases': 'N/A',      # Requer requisições adicionais
-                'Issues_Abertas': open_issues_count,
+                'Pull_Requests_Aceitas': detalhes.get('merged_pulls_count', 0),
+                'Total_de_Releases': detalhes.get('releases_count', 0),
+                'Issues_Abertas': detalhes.get('issues_abertas', repo.get('open_issues_count', 0)),
                 'Forks': repo.get('forks_count', 0),
                 'Tamanho_KB': repo.get('size', 0),
-                'Razao_Issues_Fechadas_Total': 'N/A'  # Requer cálculo complexo
+                'Razao_Issues_Fechadas_Total': detalhes.get('razao_issues_fechadas', 'N/A')
             }
             
             repo_data_list.append(repo_data)
             
+            # Pausa entre repositórios para evitar rate limiting
+            time.sleep(random.uniform(1, 2))
+            
         except Exception as e:
             print(f"    Erro ao processar repositório: {e}")
             continue
-
-        # Pequena pausa para não sobrecarregar a API
-        if i % 10 == 9:  # A cada 10 repositórios
-            time.sleep(1)
 
     if not repo_data_list:
         print("Nenhum dado foi processado com sucesso.")
@@ -313,7 +394,7 @@ def main():
     df = df.sort_values('Estrelas', ascending=False).reset_index(drop=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_filename = f'github_repos_rest_{timestamp}.csv'
+    csv_filename = f'github_repos_complete_{timestamp}.csv'
     
     try:
         df.to_csv(csv_filename, index=False, encoding='utf-8')
@@ -328,6 +409,14 @@ def main():
     print("\n--- Estatísticas dos Dados ---")
     if len(df) > 0:
         print(f"Repositório com mais estrelas: {df.iloc[0]['Repositorio']} ({df.iloc[0]['Estrelas']:,} estrelas)")
+        print(f"Média de PRs aceitas: {df['Pull_Requests_Aceitas'].mean():.1f}")
+        print(f"Média de releases: {df['Total_de_Releases'].mean():.1f}")
+        
+        # Estatísticas de razão de issues fechadas (excluindo N/A)
+        razoes_validas = df[df['Razao_Issues_Fechadas_Total'] != 'N/A']['Razao_Issues_Fechadas_Total']
+        if len(razoes_validas) > 0:
+            print(f"Média de razão issues fechadas: {razoes_validas.mean():.3f}")
+        
         print(f"Linguagens mais populares:")
         lang_counts = df['Linguagem_Primaria'].value_counts().head(5)
         for lang, count in lang_counts.items():
@@ -335,7 +424,7 @@ def main():
                 print(f"  {lang}: {count} repositórios")
 
     print("\n--- Amostra dos Dados (Top 10) ---")
-    display_columns = ['Repositorio', 'Estrelas', 'Linguagem_Primaria', 'Forks']
+    display_columns = ['Repositorio', 'Estrelas', 'Pull_Requests_Aceitas', 'Total_de_Releases', 'Razao_Issues_Fechadas_Total']
     print(df[display_columns].head(10).to_string(index=False))
 
 
