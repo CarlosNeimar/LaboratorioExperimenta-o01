@@ -1,10 +1,12 @@
 import requests
 import pandas as pd
 from datetime import datetime, timezone
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
 
-
-GITHUB_TOKEN = '' 
+GITHUB_TOKEN = os.getenv('GITHUB_TOKEN') 
 
 
 headers = {
