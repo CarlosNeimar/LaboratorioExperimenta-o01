@@ -274,7 +274,7 @@ def main():
     
     all_repos = []
     repos_por_pagina = 25
-    total_repos_desejados = 1000
+    total_repos_desejados = 100
     total_de_paginas = (total_repos_desejados + repos_por_pagina - 1) // repos_por_pagina
     
     print(f"\nBuscando os {total_repos_desejados} repositórios com mais estrelas...")
