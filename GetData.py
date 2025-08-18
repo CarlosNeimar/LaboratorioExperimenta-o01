@@ -32,7 +32,6 @@ def fazer_requisicao_com_retry(url, params=None, max_tentativas=5, delay_inicial
                 params=params,
                 timeout=30
             )
-            
         
             rate_limit_remaining = response.headers.get('X-RateLimit-Remaining')
             rate_limit_reset = response.headers.get('X-RateLimit-Reset')
@@ -55,7 +54,6 @@ def fazer_requisicao_com_retry(url, params=None, max_tentativas=5, delay_inicial
             if response.status_code == 200:
                 return response.json()
             
-        
             elif response.status_code == 403 and 'rate limit' in response.text.lower():
                 print(f"   Rate limit excedido. Aguardando reset...")
                 if rate_limit_reset:
@@ -75,7 +73,6 @@ def fazer_requisicao_com_retry(url, params=None, max_tentativas=5, delay_inicial
                 else:
                     print("   Número máximo de tentativas excedido.")
                     return None
-            
         
             else:
                 print(f"   Erro HTTP ({response.status_code}): {response.reason}")
@@ -138,11 +135,9 @@ def buscar_detalhes_repositorio(owner, repo_name):
     Busca detalhes específicos de um repositório, incluindo PRs, releases e issues.
     """
     url = f"{REPO_BASE_URL}/{owner}/{repo_name}"
-    
     print(f"     Buscando detalhes adicionais...")
-    
-
     merged_pulls_count = 0
+
     try:
     
         pulls_url = f"{url}/pulls"
@@ -203,7 +198,6 @@ def buscar_detalhes_repositorio(owner, repo_name):
     except Exception as e:
         print(f"       Erro ao buscar releases: {e}")
         releases_count = 0
-    
 
     issues_abertas = 0
     issues_fechadas = 0
@@ -279,9 +273,8 @@ def main():
             print(f"Reset em: {reset_datetime}")
     
     all_repos = []
-    repos_por_pagina = 30
-    total_repos_desejados = 50
-   # total_repos_desejados = 100 Utilizado 50 só para reduzir tempo
+    repos_por_pagina = 25
+    total_repos_desejados = 1000
     total_de_paginas = (total_repos_desejados + repos_por_pagina - 1) // repos_por_pagina
     
     print(f"\nBuscando os {total_repos_desejados} repositórios com mais estrelas...")
@@ -334,7 +327,7 @@ def main():
 
     repo_data_list = []
     print(f"\n--- Processando {len(all_repos)} repositórios ---")
-    print("⚠️  Este processo pode demorar devido às requisições adicionais para obter dados completos.")
+    print("Este processo pode demorar devido às requisições adicionais para obter dados completos.")
 
     for i, repo in enumerate(all_repos):
         if not repo: 
@@ -352,10 +345,8 @@ def main():
                 time_since_update_days = (datetime.now(timezone.utc) - pushed_at).days
             else:
                 time_since_update_days = -1
-
         
             detalhes = buscar_detalhes_repositorio(owner, name)
-            
         
             repo_data = {
                 'Repositorio': repo_name,
@@ -372,8 +363,6 @@ def main():
             }
             
             repo_data_list.append(repo_data)
-            
-        
             time.sleep(random.uniform(1, 2))
             
         except Exception as e:
@@ -385,37 +374,28 @@ def main():
         return
 
     print(f"\nProcessamento concluído! {len(repo_data_list)} repositórios processados.")
-    
 
     df = pd.DataFrame(repo_data_list)
-    
 
     df = df.sort_values('Estrelas', ascending=False).reset_index(drop=True)
     
-
-
     output_dir = 'result'
     
-
     os.makedirs(output_dir, exist_ok=True)
     
-
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     csv_filename = f'{timestamp}.csv'
     
-
     csv_filepath = os.path.join(output_dir, csv_filename)
     
     try:
-    
         df.to_csv(csv_filepath, index=False, encoding='utf-8')
-        print(f"\n✅ Dados exportados com sucesso para: '{csv_filepath}'")
+        print(f"\n Dados exportados com sucesso para: '{csv_filepath}'")
         print(f"   Total de repositórios: {len(df)}")
         print(f"   Arquivo salvo em: {os.path.abspath(csv_filepath)}")
     except Exception as e:
-        print(f"\n❌ Erro ao salvar arquivo CSV: {e}")
+        print(f"\n Erro ao salvar arquivo CSV: {e}")
         return
-
 
 
     print("\n--- Estatísticas dos Dados ---")
